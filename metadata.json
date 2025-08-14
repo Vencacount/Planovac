@@ -1,0 +1,5 @@
+{
+  "name": "Production Shift Planner (Offline Bundle)",
+  "description": "A single, standalone HTML file for production planning that works entirely offline. It includes all necessary styles and libraries.",
+  "requestFramePermissions": []
+}

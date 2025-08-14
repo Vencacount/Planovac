@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Plánovač Výroby (Offline)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    </style>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+
+    <!-- Inlined libraries for offline use -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Bundled Application Code -->
+    <script type="text/babel">
+        const { useState, useCallback, useMemo, useEffect, useRef } = React;
+
+        // --- from translations.ts ---
+        const translations = {
+            cs: {
+                title: 'Plánovač Výroby',
+                shift: 'Ranní směna',
+                inputData: 'Vstupní údaje',
+                productName: 'Název výrobku',
+                productNumber: 'Číslo výrobku',
+                weeklyDemands: 'Týdenní odvolávky (ks)',
+                norm: 'Norma (ks/h)',
+                planningPeriod: 'Období plánování',
+                startDate: 'Počáteční datum',
+                numberOfWeeks: 'Počet týdnů',
+                preventOverlap: 'Nepřekrývat směny',
+                preventOverlapHelp: 'Pokud je aktivní, výroba dalšího produktu začne vždy následující pracovní den.',
+                planWeekByWeek: 'Vyrábět dle týdenní potřeby',
+                planWeekByWeekHelp: 'Plánuje výrobu tak, aby pokryla odvolávky pouze daného týdne. Zabraňuje hromadění zásob.',
+                saveSuccess: 'Plán byl úspěšně uložen.',
+                saveError: 'Chyba při ukládání plánu.',
+                loadSuccess: 'Plán byl úspěšně načten.',
+                loadError: 'Chyba při načítání plánu. Zvolte platný soubor.',
+                importCsvSuccess: 'Data z CSV byla úspěšně importována.',
+                importCsvError: 'Chyba při importu CSV.',
+                exportCsvSuccess: 'CSV bylo úspěšně exportováno.',
+                exportCsvError: 'Chyba při exportu CSV.',
+                emptyPlanError: 'Nelze exportovat prázdný plán. Nejprve vygenerujte plán.',
+                loadButton: 'Načíst JSON',
+                saveButton: 'Uložit JSON',
+                importCsvButton: 'Import CSV',
+                exportCsvButton: 'Export CSV',
+                totalLoad: 'Celkové vytížení plánu',
+                hours: 'hodin',
+                overCapacity: 'Plán přesahuje kapacitu ranní směny!',
+                generatePlan: 'Vytvořit Plán',
+                invalidValuesError: 'Zadejte platné hodnoty pro odvolávky a normy.',
+                weeklyPlanTitle: 'Týdenní Plán Výroby',
+                product: 'Výrobek',
+                totalCapacity: 'Celkem / Kapacita (h)',
+                emptyPlanTitle: 'Plán je prázdný',
+                emptyPlanDescription: 'Zadejte údaje, zvolte období a klikněte na "Vytvořit Plán" pro zobrazení harmonogramu.',
+                weekAbbr: 'T',
+                demandPlaceholder: 'ks',
+                ratePlaceholder: 'ks/h',
+                productNamePlaceholder: 'Název výrobku',
+                productNumberPlaceholder: 'Číslo výrobku',
+                week: 'KT',
+            },
+            en: {
+                title: 'Production Planner',
+                shift: 'Morning Shift',
+                inputData: 'Input Data',
+                productName: 'Product Name',
+                productNumber: 'Product Number',
+                weeklyDemands: 'Weekly Demands (pcs)',
+                norm: 'Rate (pcs/h)',
+                planningPeriod: 'Planning Period',
+                startDate: 'Start Date',
+                numberOfWeeks: 'Number of Weeks',
+                preventOverlap: 'Don\'t overlap shifts',
+                preventOverlapHelp: 'If active, the next product starts on the next workday.',
+                planWeekByWeek: 'Plan week-by-week',
+                planWeekByWeekHelp: 'Schedules production to meet only the current week\'s demand. Prevents inventory buildup.',
+                saveSuccess: 'Plan saved successfully.',
+                saveError: 'Error saving plan.',
+                loadSuccess: 'Plan loaded successfully.',
+                loadError: 'Error loading plan. Please select a valid file.',
+                importCsvSuccess: 'CSV data imported successfully.',
+                importCsvError: 'Error importing CSV.',
+                exportCsvSuccess: 'CSV exported successfully.',
+                exportCsvError: 'Error exporting CSV.',
+                emptyPlanError: 'Cannot export an empty plan. Please generate the plan first.',
+                loadButton: 'Load JSON',
+                saveButton: 'Save JSON',
+                importCsvButton: 'Import CSV',
+                exportCsvButton: 'Export CSV',
+                totalLoad: 'Total Plan Load',
+                hours: 'hours',
+                overCapacity: 'The plan exceeds the morning shift capacity!',
+                generatePlan: 'Generate Plan',
+                invalidValuesError: 'Please enter valid values for demands and rates.',
+                weeklyPlanTitle: 'Weekly Production Plan',
+                product: 'Product',
+                totalCapacity: 'Total / Capacity (h)',
+                emptyPlanTitle: 'Plan is Empty',
+                emptyPlanDescription: 'Enter data, select a period, and click "Generate Plan" to display the schedule.',
+                weekAbbr: 'W',
+                demandPlaceholder: 'pcs',
+                ratePlaceholder: 'pcs/h',
+                productNamePlaceholder: 'Product Name',
+                productNumberPlaceholder: 'Product Number',
+                week: 'Week',
+            }
+        };
+
+        // --- from components/Icon.tsx ---
+        const CalendarIcon = ({ className }) => (
+          <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        );
+        const ChartBarIcon = ({ className }) => (
+          <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+          </svg>
+        );
+        const CogIcon = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+        );
+        const ExclamationCircleIcon = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+        );
+        const SaveIcon = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+            </svg>
+        );
+        const FolderOpenIcon = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+            </svg>
+        );
+        const UploadIcon = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+        );
+        const ExportIcon = ({ className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v2a2 2 0 002 2h14a2 2 0 002-2v-2" />
+            </svg>
+        );
+
+        // --- from App.tsx ---
+        const App = () => {
+            const SHIFT_HOURS = 8;
+            const DAYS_IN_WEEK = 7;
+
+            const PRODUCT_COLORS = [
+                'bg-yellow-300 text-yellow-900',
+                'bg-sky-200 text-sky-900',
+                'bg-rose-200 text-rose-900',
+                'bg-lime-200 text-lime-900'
+            ];
+
+            const getStartOfWeek = () => {
+                const today = new Date();
+                const day = today.getDay();
+                const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+                const monday = new Date(today.setDate(diff));
+                monday.setHours(0, 0, 0, 0);
+                return monday;
+            };
+
+            const getAllCalendarDays = (startDate, numWeeks) => {
+                const allDays = [];
+                let currentDate = new Date(startDate);
+                
+                const dayOfWeek = currentDate.getDay();
+                if (dayOfWeek !== 1) {
+                   const diff = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+                   currentDate.setDate(currentDate.getDate() + diff);
+                }
+                
+                const totalDays = numWeeks * DAYS_IN_WEEK;
+                for (let i = 0; i < totalDays; i++) {
+                    allDays.push(new Date(currentDate));
+                    currentDate.setDate(currentDate.getDate() + 1);
+                }
+                return allDays;
+            };
+
+            const getWeekNumber = (d) => {
+                d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+                d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+                const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+                const weekNo = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+                return weekNo;
+            };
+            
+            const generateGridSchedule = (productsToSchedule, allDays, numberOfWeeks, t, preventShiftOverlap, planWeekByWeek) => {
+              const productsWithValidDemands = productsToSchedule.filter(p => parseFloat(p.ratePerHour) > 0 && p.weeklyDemands.some(d => d > 0));
+              if (productsWithValidDemands.length === 0 && productsToSchedule.some(p => p.weeklyDemands.some(d => d > 0))) {
+                  return { grid: {}, error: t.invalidValuesError };
+              }
+              const dailySchedules = allDays.map(date => ({ date, tasks: [], totalHours: 0 }));
+              const availableHoursPerDay = allDays.map(date => (date.getDay() === 0 || date.getDay() === 6) ? 0 : SHIFT_HOURS);
+              if (planWeekByWeek) {
+                  for (let weekIndex = 0; weekIndex < numberOfWeeks; weekIndex++) {
+                      const productsForThisWeek = productsWithValidDemands.map(p => {
+                          const demand = p.weeklyDemands[weekIndex] || 0;
+                          const rate = parseFloat(p.ratePerHour);
+                          return { ...p, requiredHours: demand / rate };
+                      }).filter(p => p.requiredHours > 0);
+                      const workDayIndicesForWeek = Array.from({ length: 7 }, (_, i) => weekIndex * 7 + i)
+                          .filter(dayIndex => dayIndex < allDays.length && allDays[dayIndex].getDay() !== 0 && allDays[dayIndex].getDay() !== 6);
+                      if (preventShiftOverlap) {
+                          let dayPointerInWeek = 0;
+                          for (const product of productsForThisWeek) {
+                              let hoursToSchedule = product.requiredHours;
+                              let scheduledThisProduct = false;
+                              while (hoursToSchedule > 0 && dayPointerInWeek < workDayIndicesForWeek.length) {
+                                  scheduledThisProduct = true;
+                                  const dayIndex = workDayIndicesForWeek[dayPointerInWeek];
+                                  const hoursOnThisDay = Math.min(hoursToSchedule, availableHoursPerDay[dayIndex]);
+                                  if (hoursOnThisDay > 0) {
+                                      dailySchedules[dayIndex].tasks.push({ productId: product.id, productName: product.name, hours: hoursOnThisDay });
+                                      dailySchedules[dayIndex].totalHours += hoursOnThisDay;
+                                      availableHoursPerDay[dayIndex] -= hoursOnThisDay;
+                                      hoursToSchedule -= hoursOnThisDay;
+                                  }
+                                  if (hoursToSchedule > 0) dayPointerInWeek++;
+                              }
+                              if (scheduledThisProduct) dayPointerInWeek++;
+                          }
+                      } else {
+                          for (const product of productsForThisWeek) {
+                              let hoursToSchedule = product.requiredHours;
+                              for (const dayIndex of workDayIndicesForWeek) {
+                                  if (hoursToSchedule <= 0) break;
+                                  const hoursOnThisDay = Math.min(hoursToSchedule, availableHoursPerDay[dayIndex]);
+                                  if (hoursOnThisDay > 0) {
+                                      dailySchedules[dayIndex].tasks.push({ productId: product.id, productName: product.name, hours: hoursOnThisDay });
+                                      dailySchedules[dayIndex].totalHours += hoursOnThisDay;
+                                      availableHoursPerDay[dayIndex] -= hoursOnThisDay;
+                                      hoursToSchedule -= hoursOnThisDay;
+                                  }
+                              }
+                          }
+                      }
+                  }
+              } else {
+                  const allProductsWithTotalHours = productsWithValidDemands.map(p => {
+                      const totalDemand = p.weeklyDemands.reduce((sum, demand) => sum + (demand || 0), 0);
+                      const rate = parseFloat(p.ratePerHour);
+                      return { ...p, requiredHours: totalDemand / rate };
+                  }).filter(p => p.requiredHours > 0);
+                  const allWorkDayIndices = allDays.map((d, i) => i).filter(i => allDays[i].getDay() !== 0 && allDays[i].getDay() !== 6);
+                  if (preventShiftOverlap) {
+                      let dayPointer = 0;
+                      for (const product of allProductsWithTotalHours) {
+                          let hoursToSchedule = product.requiredHours;
+                          let scheduledThisProduct = false;
+                          while (hoursToSchedule > 0 && dayPointer < allWorkDayIndices.length) {
+                              scheduledThisProduct = true;
+                              const dayIndex = allWorkDayIndices[dayPointer];
+                              const hoursOnThisDay = Math.min(hoursToSchedule, availableHoursPerDay[dayIndex]);
+                              if (hoursOnThisDay > 0) {
+                                  dailySchedules[dayIndex].tasks.push({ productId: product.id, productName: product.name, hours: hoursOnThisDay });
+                                  dailySchedules[dayIndex].totalHours += hoursOnThisDay;
+                                  availableHoursPerDay[dayIndex] -= hoursOnThisDay;
+                                  hoursToSchedule -= hoursOnThisDay;
+                              }
+                              if (hoursToSchedule > 0) dayPointer++;
+                          }
+                          if (scheduledThisProduct) dayPointer++;
+                      }
+                  } else {
+                      for (const product of allProductsWithTotalHours) {
+                          let hoursToSchedule = product.requiredHours;
+                          for (const dayIndex of allWorkDayIndices) {
+                              if (hoursToSchedule <= 0) break;
+                              const hoursOnThisDay = Math.min(hoursToSchedule, availableHoursPerDay[dayIndex]);
+                              if (hoursOnThisDay > 0) {
+                                  dailySchedules[dayIndex].tasks.push({ productId: product.id, productName: product.name, hours: hoursOnThisDay });
+                                  dailySchedules[dayIndex].totalHours += hoursOnThisDay;
+                                  availableHoursPerDay[dayIndex] -= hoursOnThisDay;
+                                  hoursToSchedule -= hoursOnThisDay;
+                              }
+                          }
+                      }
+                  }
+              }
+              const newGridSchedule = {};
+              productsToSchedule.forEach(p => {
+                  newGridSchedule[p.id] = Array(allDays.length).fill(0);
+              });
+              dailySchedules.forEach((day, dayIndex) => {
+                  day.tasks.forEach(task => {
+                      if (newGridSchedule[task.productId]) {
+                          newGridSchedule[task.productId][dayIndex] += task.hours;
+                      }
+                  });
+              });
+              return { grid: newGridSchedule, error: null };
+            };
+            
+            const ProductInputRow = ({ product, numberOfWeeks, translations, onNameChange, onNumberChange, onDemandChange, onRateChange }) => (
+                <div className="space-y-4 bg-white p-4 rounded-lg shadow-sm">
+                    <div className="flex items-center gap-3">
+                        <span className={`w-4 h-4 rounded-full shrink-0 ${product.color.split(' ')[0]}`}></span>
+                        <div className="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <input
+                                type="text"
+                                value={product.name}
+                                onChange={(e) => onNameChange(product.id, e.target.value)}
+                                placeholder={translations.productNamePlaceholder}
+                                className="w-full p-2 border border-gray-300 rounded-md font-semibold focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                aria-label={`${translations.productName} for ${product.name}`}
+                            />
+                            <input
+                                type="text"
+                                value={product.productNumber ?? ''}
+                                onChange={(e) => onNumberChange(product.id, e.target.value)}
+                                placeholder={translations.productNumberPlaceholder}
+                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                 aria-label={`${translations.productNumber} for ${product.name}`}
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-500">{translations.weeklyDemands}</label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-2">
+                             {Array.from({ length: numberOfWeeks }).map((_, weekIndex) => (
+                                <div key={weekIndex} className="relative">
+                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-semibold">{translations.weekAbbr}{weekIndex + 1}</span>
+                                    <input
+                                        type="number"
+                                        value={product.weeklyDemands[weekIndex] ?? ''}
+                                        onChange={(e) => onDemandChange(product.id, weekIndex, e.target.value)}
+                                        placeholder={translations.demandPlaceholder}
+                                        className="w-full pl-7 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-right"
+                                        aria-label={`${translations.weeklyDemands} for week ${weekIndex + 1} for ${product.name}`}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                     <div className="space-y-2">
+                        <label htmlFor={`rate-${product.id}`} className="block text-sm font-medium text-gray-500">{translations.norm}</label>
+                        <input
+                            type="number"
+                            id={`rate-${product.id}`}
+                            value={product.ratePerHour}
+                            onChange={(e) => onRateChange(product.id, e.target.value)}
+                            placeholder={translations.ratePlaceholder}
+                            className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-right"
+                        />
+                    </div>
+                </div>
+            );
+
+
+            const [products, setProducts] = useState([
+                { id: 1, name: 'Výrobek 1', productNumber: 'PN-001A', weeklyDemands: [160, 170, 180, 160, 170, 180], ratePerHour: '10', color: PRODUCT_COLORS[0] },
+                { id: 2, name: 'Výrobek 2', productNumber: 'PN-002B', weeklyDemands: [80, 80, 90, 80, 80, 90], ratePerHour: '20', color: PRODUCT_COLORS[1] },
+                { id: 3, name: 'Výrobek 3', productNumber: 'PN-003C', weeklyDemands: [120, 120, 120, 120, 120, 120], ratePerHour: '5', color: PRODUCT_COLORS[2] },
+                { id: 4, name: 'Výrobek 4', productNumber: 'PN-004D', weeklyDemands: [100, 110, 100, 100, 110, 100], ratePerHour: '8', color: PRODUCT_COLORS[3] },
+            ]);
+            const [gridSchedule, setGridSchedule] = useState({});
+            const [error, setError] = useState(null);
+            const [startDate, setStartDate] = useState(getStartOfWeek().toISOString().split('T')[0]);
+            const [numberOfWeeks, setNumberOfWeeks] = useState(6);
+            const [language, setLanguage] = useState('cs');
+            const [notification, setNotification] = useState(null);
+            const [preventShiftOverlap, setPreventShiftOverlap] = useState(false);
+            const [planWeekByWeek, setPlanWeekByWeek] = useState(true);
+            const fileInputRef = useRef(null);
+            const csvFileInputRef = useRef(null);
+
+            const t = useMemo(() => translations[language], [language]);
+
+            useEffect(() => {
+                document.documentElement.lang = language;
+            }, [language]);
+
+            useEffect(() => {
+                setProducts(prevProducts =>
+                    prevProducts.map(p => {
+                        const newDemands = [...p.weeklyDemands];
+                        const lastDemand = newDemands.length > 0 ? newDemands[newDemands.length - 1] : 0;
+                        while (newDemands.length < numberOfWeeks) {
+                            newDemands.push(lastDemand);
+                        }
+                        return { ...p, weeklyDemands: newDemands.slice(0, numberOfWeeks) };
+                    })
+                );
+            }, [numberOfWeeks]);
+            
+            useEffect(() => {
+                if (notification) {
+                    const timer = setTimeout(() => setNotification(null), 5000);
+                    return () => clearTimeout(timer);
+                }
+            }, [notification]);
+
+            const allCalendarDays = useMemo(() => {
+                const date = new Date(startDate);
+                if (isNaN(date.getTime())) return getAllCalendarDays(getStartOfWeek(), numberOfWeeks);
+                const utcDate = new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+                return getAllCalendarDays(utcDate, numberOfWeeks);
+            }, [startDate, numberOfWeeks]);
+            
+            const workWeekDates = useMemo(() => allCalendarDays.filter(d => d.getDay() !== 0 && d.getDay() !== 6), [allCalendarDays]);
+            const totalWorkDays = workWeekDates.length;
+
+            const handleProductNameChange = useCallback((id, value) => {
+                setProducts(prev => prev.map(p => p.id === id ? { ...p, name: value } : p));
+            }, []);
+
+            const handleProductNumberChange = useCallback((id, value) => {
+                setProducts(prev => prev.map(p => p.id === id ? { ...p, productNumber: value } : p));
+            }, []);
+
+            const handleProductDemandChange = useCallback((id, weekIndex, value) => {
+                setProducts(prev => prev.map(p => {
+                    if (p.id === id) {
+                        const newDemands = [...p.weeklyDemands];
+                        newDemands[weekIndex] = parseInt(value, 10) || 0;
+                        return { ...p, weeklyDemands: newDemands };
+                    }
+                    return p;
+                }));
+            }, []);
+
+            const handleProductRateChange = useCallback((id, value) => {
+                setProducts(prev => prev.map(p => p.id === id ? { ...p, ratePerHour: value } : p));
+            }, []);
+
+            const totalAvailableHours = useMemo(() => totalWorkDays * SHIFT_HOURS, [totalWorkDays]);
+
+            const totalRequiredHours = useMemo(() => {
+                return products.reduce((total, p) => {
+                    const totalDemand = p.weeklyDemands.reduce((sum, demand) => sum + (demand || 0), 0);
+                    const rate = parseFloat(p.ratePerHour);
+                    if (totalDemand > 0 && rate > 0) {
+                        return total + (totalDemand / rate);
+                    }
+                    return total;
+                }, 0);
+            }, [products]);
+
+            const handleGeneratePlan = useCallback(() => {
+                const { grid, error: generationError } = generateGridSchedule(products, allCalendarDays, numberOfWeeks, t, preventShiftOverlap, planWeekByWeek);
+                setGridSchedule(grid);
+                setError(generationError);
+            }, [products, allCalendarDays, numberOfWeeks, t, preventShiftOverlap, planWeekByWeek]);
+            
+            const handleSavePlan = useCallback(() => {
+                try {
+                    const planData = { products, startDate, numberOfWeeks, preventShiftOverlap, planWeekByWeek };
+                    const jsonString = JSON.stringify(planData, null, 2);
+                    const blob = new Blob([jsonString], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    const dateStr = new Date().toISOString().split('T')[0];
+                    link.download = `plan-vyroby-${dateStr}.json`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    setNotification({ type: 'success', text: t.saveSuccess });
+                } catch (e) {
+                    console.error("Failed to save plan:", e);
+                    setNotification({ type: 'error', text: t.saveError });
+                }
+            }, [products, startDate, numberOfWeeks, preventShiftOverlap, planWeekByWeek, t]);
+
+            const handleJsonFileChange = useCallback((event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const text = e.target?.result;
+                        if (typeof text !== 'string') throw new Error("File is not readable");
+                        
+                        const data = JSON.parse(text);
+
+                        if (!data.products || !data.startDate || typeof data.numberOfWeeks === 'undefined' || !Array.isArray(data.products)) {
+                            throw new Error("Invalid plan file structure.");
+                        }
+
+                        setProducts(data.products);
+                        setStartDate(data.startDate);
+                        setNumberOfWeeks(data.numberOfWeeks);
+                        setPreventShiftOverlap(data.preventShiftOverlap ?? false);
+                        setPlanWeekByWeek(data.planWeekByWeek ?? false);
+
+
+                        const loadedStartDate = new Date(data.startDate);
+                        const utcDate = new Date(loadedStartDate.getUTCFullYear(), loadedStartDate.getUTCMonth(), loadedStartDate.getUTCDate());
+                        const loadedAllDays = getAllCalendarDays(utcDate, data.numberOfWeeks);
+                        
+                        const { grid, error: generationError } = generateGridSchedule(data.products, loadedAllDays, data.numberOfWeeks, t, data.preventShiftOverlap ?? false, data.planWeekByWeek ?? false);
+                        setGridSchedule(grid);
+                        setError(generationError);
+
+                        setNotification({ type: 'success', text: t.loadSuccess });
+                    } catch (err) {
+                        console.error("Failed to load plan:", err);
+                        const errorMessage = t.loadError;
+                        setNotification({ type: 'error', text: errorMessage });
+                        setError(errorMessage);
+                    } finally {
+                        if(event.target) event.target.value = '';
+                    }
+                };
+                reader.readAsText(file);
+            }, [t]);
+
+            const handleCsvFileChange = useCallback((event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const text = e.target?.result;
+                        if (typeof text !== 'string') throw new Error("File not readable");
+
+                        const lines = text.trim().split(/\r?\n/);
+                        if (lines.length < 2) throw new Error(t.importCsvError);
+
+                        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+                        const dataRows = lines.slice(1);
+
+                        const requiredHeaders = ['productname', 'productnumber', 'rateperhour'];
+                        if (!requiredHeaders.every(h => headers.includes(h))) {
+                            throw new Error(`CSV must contain headers: ${requiredHeaders.join(', ')}`);
+                        }
+
+                        const demandHeaders = headers.filter(h => /^week\d+_demand$/.test(h)).sort((a,b) => parseInt(a.match(/\d+/)?.[0] || '0') - parseInt(b.match(/\d+/)?.[0] || '0'));
+                        if (demandHeaders.length === 0) {
+                             throw new Error("CSV must have at least one demand column (e.g., week1_demand).");
+                        }
+                        
+                        const newProducts = dataRows.map((row, index) => {
+                            if (row.trim() === '') return null;
+                            const values = row.split(',').map(v => v.trim());
+                            const rowData = {};
+                            headers.forEach((header, i) => { rowData[header] = values[i] || ''; });
+
+                            const weeklyDemands = demandHeaders.map(dh => {
+                                const demandIndex = headers.indexOf(dh);
+                                return parseInt(values[demandIndex], 10) || 0;
+                            });
+                            
+                            return {
+                                id: index + 1,
+                                name: rowData['productname'] || `Product ${index + 1}`,
+                                productNumber: rowData['productnumber'] || '',
+                                ratePerHour: rowData['rateperhour'] || '0',
+                                weeklyDemands,
+                                color: PRODUCT_COLORS[index % PRODUCT_COLORS.length],
+                            };
+                        }).filter((p) => p !== null);
+                        
+                        setProducts(newProducts);
+                        setNumberOfWeeks(demandHeaders.length);
+                        
+                        const importedStartDate = new Date(startDate);
+                        const utcDate = new Date(importedStartDate.getUTCFullYear(), importedStartDate.getUTCMonth(), importedStartDate.getUTCDate());
+                        const importedAllDays = getAllCalendarDays(utcDate, demandHeaders.length);
+                        
+                        const { grid, error: generationError } = generateGridSchedule(newProducts, importedAllDays, demandHeaders.length, t, preventShiftOverlap, planWeekByWeek);
+                        setGridSchedule(grid);
+                        setError(generationError);
+
+                        setNotification({ type: 'success', text: t.importCsvSuccess });
+                    } catch (err) {
+                        console.error("Failed to import CSV:", err);
+                        setNotification({ type: 'error', text: `${t.importCsvError} ${err.message}` });
+                    } finally {
+                        if (event.target) event.target.value = '';
+                    }
+                };
+                reader.readAsText(file);
+            }, [t, startDate, preventShiftOverlap, planWeekByWeek]);
+            
+            const dayFormatter = useMemo(() => new Intl.DateTimeFormat(language, { weekday: 'short' }), [language]);
+            const dateFormatter = useMemo(() => new Intl.DateTimeFormat(language, { day: 'numeric', month: 'numeric' }), [language]);
+
+            const handleExportCsv = useCallback(() => {
+                if (Object.keys(gridSchedule).length === 0) {
+                    setNotification({ type: 'error', text: t.emptyPlanError });
+                    return;
+                }
+
+                try {
+                    const headers = ['Date', 'Weekday', 'WeekNumber', 'ProductName', 'ProductNumber', 'ScheduledHours'];
+                    const csvRows = [headers.join(',')];
+
+                    allCalendarDays.forEach((date, dayIndex) => {
+                        const dayOfWeek = dayFormatter.format(date);
+                        const weekNum = getWeekNumber(date);
+                        
+                        products.forEach(product => {
+                            const scheduledHours = gridSchedule[product.id]?.[dayIndex];
+                            if (scheduledHours && scheduledHours > 0) {
+                                const row = [
+                                    date.toISOString().split('T')[0],
+                                    `"${dayOfWeek.replace(/"/g, '""')}"`,
+                                    weekNum,
+                                    `"${product.name.replace(/"/g, '""')}"`,
+                                    `"${product.productNumber.replace(/"/g, '""')}"`,
+                                    scheduledHours.toFixed(2)
+                                ];
+                                csvRows.push(row.join(','));
+                            }
+                        });
+                    });
+
+                    const csvString = csvRows.join('\n');
+                    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    const dateStr = new Date().toISOString().split('T')[0];
+                    link.download = `production-plan-${dateStr}.csv`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    setNotification({ type: 'success', text: t.exportCsvSuccess });
+
+                } catch (e) {
+                    console.error("Failed to export CSV:", e);
+                    setNotification({ type: 'error', text: t.exportCsvError });
+                }
+            }, [gridSchedule, allCalendarDays, products, dayFormatter, t]);
+
+
+            const dailyTotals = useMemo(() => {
+                if (Object.keys(gridSchedule).length === 0) return [];
+                const totals = Array(allCalendarDays.length).fill(0);
+                Object.values(gridSchedule).forEach(productHours => {
+                    productHours.forEach((hours, dayIndex) => {
+                        totals[dayIndex] += hours;
+                    });
+                });
+                return totals;
+            }, [gridSchedule, allCalendarDays]);
+
+            return (
+                <div className="min-h-screen text-gray-800 font-sans">
+                    <header className="bg-white shadow-md">
+                        <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+                            <div className="flex items-center space-x-3">
+                                <CogIcon className="h-8 w-8 text-blue-600" />
+                                <h1 className="text-3xl font-bold text-gray-800">{t.title}</h1>
+                            </div>
+                            <div className="flex items-center space-x-4">
+                                 <div className="hidden sm:block text-sm text-gray-500">{t.shift}</div>
+                                 <div className="flex items-center space-x-1 bg-gray-100 p-1 rounded-lg">
+                                    <button
+                                        onClick={() => setLanguage('cs')}
+                                        className={`px-3 py-1 text-sm font-semibold rounded-md transition-colors duration-200 ${language === 'cs' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:bg-gray-200'}`}
+                                        aria-pressed={language === 'cs'}
+                                    >
+                                        CS
+                                    </button>
+                                    <button
+                                        onClick={() => setLanguage('en')}
+                                        className={`px-3 py-1 text-sm font-semibold rounded-md transition-colors duration-200 ${language === 'en' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:bg-gray-200'}`}
+                                        aria-pressed={language === 'en'}
+                                    >
+                                        EN
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            <div className="lg:col-span-1 space-y-6">
+                                <div className="bg-white p-6 rounded-xl shadow-lg">
+                                   <h2 className="text-2xl font-semibold text-gray-800 mb-4 flex items-center gap-2"><ChartBarIcon className="h-6 w-6 text-gray-500"/>{t.inputData}</h2>
+                                   <div className="space-y-4">
+                                       {products.map(p => (
+                                           <ProductInputRow 
+                                              key={p.id} 
+                                              product={p} 
+                                              numberOfWeeks={numberOfWeeks}
+                                              translations={t}
+                                              onNameChange={handleProductNameChange}
+                                              onNumberChange={handleProductNumberChange}
+                                              onDemandChange={handleProductDemandChange}
+                                              onRateChange={handleProductRateChange}
+                                            />
+                                       ))}
+                                   </div>
+                                </div>
+                                
+                                <div className="bg-white p-6 rounded-xl shadow-lg">
+                                   <h2 className="text-2xl font-semibold text-gray-800 mb-4 flex items-center gap-2"><CalendarIcon className="h-6 w-6 text-gray-500"/>{t.planningPeriod}</h2>
+                                   <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label htmlFor="start-date" className="block text-sm font-medium text-gray-500 mb-1">{t.startDate}</label>
+                                            <input 
+                                                type="date"
+                                                id="start-date"
+                                                value={startDate}
+                                                onChange={(e) => setStartDate(e.target.value)}
+                                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label htmlFor="num-weeks" className="block text-sm font-medium text-gray-500 mb-1">{t.numberOfWeeks}</label>
+                                            <input 
+                                                type="number"
+                                                id="num-weeks"
+                                                min="1"
+                                                max="20"
+                                                value={numberOfWeeks}
+                                                onChange={(e) => setNumberOfWeeks(parseInt(e.target.value, 10) || 1)}
+                                                className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                            />
+                                        </div>
+                                   </div>
+                                   <div className="col-span-2 mt-6 space-y-4 border-t pt-4">
+                                        <label htmlFor="plan-week-by-week" className="flex items-center cursor-pointer select-none">
+                                            <div className="relative">
+                                                <input
+                                                    id="plan-week-by-week"
+                                                    type="checkbox"
+                                                    className="sr-only peer"
+                                                    checked={planWeekByWeek}
+                                                    onChange={e => setPlanWeekByWeek(e.target.checked)}
+                                                />
+                                                <div className="w-14 h-8 bg-gray-200 rounded-full peer-checked:bg-blue-600 transition-colors duration-300"></div>
+                                                <div className="absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform peer-checked:translate-x-6"></div>
+                                            </div>
+                                            <span className="ml-3 text-sm font-medium text-gray-700">{t.planWeekByWeek}</span>
+                                        </label>
+                                        <p className="text-xs text-gray-500 mt-1 max-w-xs">{t.planWeekByWeekHelp}</p>
+
+                                        <label htmlFor="prevent-overlap" className="flex items-center cursor-pointer select-none">
+                                            <div className="relative">
+                                                <input
+                                                    id="prevent-overlap"
+                                                    type="checkbox"
+                                                    className="sr-only peer"
+                                                    checked={preventShiftOverlap}
+                                                    onChange={e => setPreventShiftOverlap(e.target.checked)}
+                                                />
+                                                <div className="w-14 h-8 bg-gray-200 rounded-full peer-checked:bg-blue-600 transition-colors duration-300"></div>
+                                                <div className="absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition-transform duration-300 transform peer-checked:translate-x-6"></div>
+                                            </div>
+                                            <span className="ml-3 text-sm font-medium text-gray-700">{t.preventOverlap}</span>
+                                        </label>
+                                        <p className="text-xs text-gray-500 mt-1 max-w-xs">{t.preventOverlapHelp}</p>
+                                    </div>
+                                </div>
+
+                                <div className="sticky top-8 space-y-4">
+                                    {notification && (
+                                        <div className={`p-3 rounded-lg text-sm font-semibold text-center ${notification.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                            {notification.text}
+                                        </div>
+                                    )}
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <button
+                                            onClick={() => csvFileInputRef.current?.click()}
+                                            className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 font-bold py-2 px-3 rounded-lg hover:bg-gray-100 focus:outline-none focus:ring-4 focus:ring-gray-300 transition-all duration-200"
+                                        >
+                                            <UploadIcon className="h-5 w-5" /> {t.importCsvButton}
+                                        </button>
+                                        <button
+                                            onClick={handleExportCsv}
+                                            className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 font-bold py-2 px-3 rounded-lg hover:bg-gray-100 focus:outline-none focus:ring-4 focus:ring-gray-300 transition-all duration-200"
+                                        >
+                                            <ExportIcon className="h-5 w-5" /> {t.exportCsvButton}
+                                        </button>
+                                        <input type="file" ref={csvFileInputRef} onChange={handleCsvFileChange} accept=".csv" className="hidden" />
+                                        
+                                        <button
+                                            onClick={() => fileInputRef.current?.click()}
+                                            className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 font-bold py-2 px-3 rounded-lg hover:bg-gray-100 focus:outline-none focus:ring-4 focus:ring-gray-300 transition-all duration-200"
+                                        >
+                                            <FolderOpenIcon className="h-5 w-5" /> {t.loadButton}
+                                        </button>
+                                        <input type="file" ref={fileInputRef} onChange={handleJsonFileChange} accept=".json" className="hidden" />
+                                        <button
+                                            onClick={handleSavePlan}
+                                            className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 font-bold py-2 px-3 rounded-lg hover:bg-gray-100 focus:outline-none focus:ring-4 focus:ring-gray-300 transition-all duration-200"
+                                        >
+                                            <SaveIcon className="h-5 w-5" /> {t.saveButton}
+                                        </button>
+                                    </div>
+
+                                    <div className={`p-4 rounded-xl shadow-lg ${totalRequiredHours > totalAvailableHours ? 'bg-red-100' : 'bg-green-100'}`}>
+                                        <h3 className="font-semibold text-lg mb-2">{t.totalLoad}</h3>
+                                        <div className="text-3xl font-bold">
+                                            <span className={totalRequiredHours > totalAvailableHours ? 'text-red-600' : 'text-green-600'}>
+                                                {totalRequiredHours.toFixed(2)}
+                                            </span>
+                                            <span className="text-xl font-normal text-gray-600"> / {totalAvailableHours} {t.hours}</span>
+                                        </div>
+                                        {totalRequiredHours > totalAvailableHours && (
+                                            <p className="text-red-700 mt-2 text-sm flex items-center gap-1"><ExclamationCircleIcon className="h-4 w-4" /> {t.overCapacity}</p>
+                                        )}
+                                    </div>
+
+                                    <button
+                                        onClick={handleGeneratePlan}
+                                        className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-all duration-300 ease-in-out transform hover:-translate-y-1"
+                                    >
+                                        {t.generatePlan}
+                                    </button>
+                                    {error && <p className="text-red-600 text-center font-medium mt-2">{error}</p>}
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-2">
+                                {Object.keys(gridSchedule).length > 0 ? (
+                                    <div className="bg-white p-6 rounded-xl shadow-lg">
+                                        <h2 className="text-3xl font-bold text-gray-800 mb-6">{t.weeklyPlanTitle}</h2>
+                                        <div className="overflow-x-auto rounded-lg border border-gray-200">
+                                            <table className="w-full text-left border-collapse" style={{ minWidth: `${Math.max(600, allCalendarDays.length * 70)}px` }}>
+                                                <thead className="sticky top-0 bg-white z-20">
+                                                    <tr className="bg-gray-100">
+                                                        <th rowSpan={2} className="p-3 text-sm font-semibold text-gray-700 sticky left-0 bg-gray-100 z-30 w-40 border-r border-b border-gray-300">{t.product}</th>
+                                                        {Array.from({ length: numberOfWeeks }).map((_, weekIndex) => (
+                                                            <th key={weekIndex} colSpan={DAYS_IN_WEEK} className="p-1 text-center font-bold text-gray-600 border-b border-l border-gray-300">
+                                                                {t.week} {getWeekNumber(allCalendarDays[weekIndex * DAYS_IN_WEEK])}
+                                                            </th>
+                                                        ))}
+                                                    </tr>
+                                                    <tr className="bg-gray-50">
+                                                        {allCalendarDays.map((date, index) => {
+                                                            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+                                                            return (
+                                                                <th key={index} className={`p-2 text-xs font-semibold text-center border-b border-l border-gray-300 ${isWeekend ? 'bg-gray-200 text-gray-500' : 'text-gray-500'}`}>
+                                                                    <div className="capitalize">{dayFormatter.format(date)}</div>
+                                                                    <div className="font-normal">{dateFormatter.format(date)}</div>
+                                                                </th>
+                                                            );
+                                                        })}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {products.map((product) => (
+                                                        <tr key={product.id} className="border-t border-gray-200 hover:bg-gray-50">
+                                                            <td className="p-2 sticky left-0 z-10 border-r border-gray-300 bg-white hover:bg-gray-50 w-40">
+                                                                <div className="font-semibold">{product.name}</div>
+                                                                <div className="text-xs text-gray-500 font-normal">{product.productNumber}</div>
+                                                            </td>
+                                                            {gridSchedule[product.id]?.map((hours, index) => {
+                                                                const isWeekend = allCalendarDays[index].getDay() === 0 || allCalendarDays[index].getDay() === 6;
+                                                                return (
+                                                                  <td key={index} className={`p-1 text-center tabular-nums border-l border-gray-200 align-middle h-14 ${isWeekend ? 'bg-gray-100' : ''}`}>
+                                                                      {hours > 0 && (
+                                                                          <div className={`rounded-md py-1 px-2 h-full flex flex-col justify-center items-center font-semibold text-sm ${product.color}`}>
+                                                                              <span>{hours.toFixed(1)} h</span>
+                                                                          </div>
+                                                                      )}
+                                                                  </td>
+                                                                )
+                                                            }) || Array(allCalendarDays.length).fill(null).map((_, index) => {
+                                                                const isWeekend = allCalendarDays[index].getDay() === 0 || allCalendarDays[index].getDay() === 6;
+                                                                return <td key={index} className={`p-1 border-l border-gray-200 ${isWeekend ? 'bg-gray-100' : ''}`}></td>
+                                                            }) }
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                                <tfoot>
+                                                    <tr className="bg-gray-100 font-bold border-t-2 border-gray-300">
+                                                        <td className="p-2 sticky left-0 bg-gray-100 z-10 text-sm border-r border-gray-300">{t.totalCapacity}</td>
+                                                        {dailyTotals.map((total, index) => {
+                                                            const isWeekend = allCalendarDays[index].getDay() === 0 || allCalendarDays[index].getDay() === 6;
+                                                            return (
+                                                              <td key={index} className={`p-2 text-center tabular-nums text-xs border-l border-gray-300 ${isWeekend ? 'bg-gray-200 text-gray-500' : (total > SHIFT_HOURS ? 'text-red-600' : 'text-green-700')}`}>
+                                                                  {isWeekend ? '-' : `${total.toFixed(1)} / ${SHIFT_HOURS}`}
+                                                              </td>
+                                                            )
+                                                        })}
+                                                    </tr>
+                                                </tfoot>
+                                            </table>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center justify-center bg-white h-full p-10 rounded-xl shadow-lg text-center">
+                                       <CalendarIcon className="h-24 w-24 text-gray-300 mb-4" />
+                                       <h2 className="text-2xl font-semibold text-gray-700">{t.emptyPlanTitle}</h2>
+                                       <p className="text-gray-500 mt-2 max-w-sm">{t.emptyPlanDescription}</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        // --- from index.tsx ---
+        const rootElement = document.getElementById('root');
+        if (!rootElement) {
+          throw new Error("Could not find root element to mount to");
+        }
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(<App />);
+
+    </script>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>
